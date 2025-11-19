@@ -1,0 +1,124 @@
+//1st code (Creating geometry as an eatrh engine asset)
+// Define the boundary of Bangladesh using a FeatureCollection
+var bangladesh = ee.FeatureCollection("FAO/GAUL/2015/level0")
+    .filter(ee.Filter.eq('ADM0_NAME', 'Bangladesh'));
+
+// Use the Global Mangrove Forests Distribution dataset
+var mangroves = ee.Image("LANDSAT/MANGROVE_FORESTS/2000");
+
+// Clip the mangrove forest data to the boundary of Bangladesh
+var clippedMangroves = mangroves.clip(bangladesh);
+
+// Define your rectangle geometry
+var geometry = ee.Geometry.Polygon(
+  [[[88.96805690078054, 22.563443085495596],
+    [88.96805690078054, 21.61417675117884],
+    [89.90464137343679, 21.61417675117884],
+    [89.90464137343679, 22.563443085495596]]], null, false
+);
+
+// Clip again to the rectangle → this gives only the common area
+var finalMangroves = clippedMangroves.clip(geometry);
+
+// Convert raster mangroves to vector polygons (with higher pixel limit)
+var vectors = finalMangroves.reduceToVectors({
+  geometry: geometry,
+  scale: 30,   // Landsat resolution
+  geometryType: 'polygon',
+  eightConnected: true,
+  labelProperty: 'mangrove',
+  reducer: ee.Reducer.countEvery(),
+  maxPixels: 1e8   // << allow more pixels
+});
+
+// Merge all polygons into one single polygon (dissolve)
+var singlePolygon = vectors.union(1);
+
+// Display result
+Map.centerObject(geometry, 9);
+Map.addLayer(singlePolygon, {color: 'green'}, 'Single Polygon');
+
+
+// Export as Earth Engine Asset
+Export.table.toAsset({
+  collection: singlePolygon,
+  description: 'Mangroves_SinglePolygon_Asset',
+  assetId: 'Mangroves_SinglePolygon'  // 
+  });
+
+
+//2nd code(Time Series Analysis Code)
+var geometry = ee.FeatureCollection("projects/ee-mohammadoney/assets/Mangroves_SinglePolygon");
+// Load Sentinel-2 Harmonized
+var s2 = ee.ImageCollection('COPERNICUS/S2_HARMONIZED');
+
+// Define the Sundarbans region
+var geometry=geometry.geometry()
+Map.centerObject(geometry, 8);
+
+// Step 1: Filter Sentinel-2 Collection (2016-2024)
+var filtered = s2
+  .filterDate('2016-01-01', '2025-01-01')
+  .filterBounds(geometry)
+  .select(['B4', 'B8']); // Select only Red & NIR bands for NDVI
+
+// Step 2: Load Cloud Score+ Collection
+var csPlus = ee.ImageCollection('GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED');
+var csPlusBands = csPlus.first().bandNames();
+var filteredS2WithCs = filtered.linkCollection(csPlus, csPlusBands);
+
+// Step 3: Cloud Masking Function
+function maskClouds(image) {
+  var qaBand = 'cs';  // Cloud Score+ band
+  var mask = image.select(qaBand).gte(0.5);  // Keep clear pixels (above threshold)
+  return image.updateMask(mask);
+}
+
+// Step 4: NDVI Computation Function
+function addNDVI(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']).rename('ndvi');
+  return image.addBands(ndvi)
+              .updateMask(image.select('B8').gt(0)) // Ensure valid pixels
+              .updateMask(image.select('B4').gt(0)); 
+}
+
+// Apply Cloud Masking and Compute NDVI
+var withNdvi = filteredS2WithCs.map(maskClouds).map(addNDVI);
+
+// Step 5: Group by Month to Reduce Data Size(2016 to 2024)
+var months = ee.List.sequence(1, 12);
+var years = ee.List.sequence(2016, 2024);
+
+var monthlyNdvi = ee.ImageCollection(years.map(function(y) {
+  return months.map(function(m) {
+    var filteredMonth = withNdvi
+      .filter(ee.Filter.calendarRange(y, y, 'year'))
+      .filter(ee.Filter.calendarRange(m, m, 'month'))
+      .mean();  // Create monthly average NDVI
+    
+    return filteredMonth
+      .set('year', y)
+      .set('month', m)
+      .set('system:time_start', ee.Date.fromYMD(y, m, 1)); // Set time
+  });
+}).flatten());
+
+// Step 6: NDVI Time-Series Chart (Fixed)
+var chart = ui.Chart.image.series({
+  imageCollection: monthlyNdvi.select('ndvi'),
+  region: geometry,
+  reducer: ee.Reducer.mean(),
+  scale: 1000  // Use 1000m resolution
+}).setOptions({
+  lineWidth: 1.5,
+  pointSize: 3,
+  title: 'Bangladesh Mangrove NDVI Time-Series (2016-2024) - Monthly Average',
+  interpolateNulls: true,
+  vAxis: {title: 'NDVI'},
+  hAxis: {title: 'Year', format: 'YYYY-MM'}
+});
+
+// Print the chart
+print(chart);
+
+
