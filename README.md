@@ -1,32 +1,62 @@
-# NDVI-Time-Series-Analysis-2016-2024-
+# Sundarbans-7-Year Satellite Monitoring
 
-Objective:
-The primary objective of this project is to assess the health and temporal dynamics of the mangrove forests within the Sundarbans region of Bangladesh. This is achieved by generating a long-term, monthly-averaged NDVI (Normalized Difference Vegetation Index) time series from 2016 to 2024. NDVI serves as a proxy for vegetation density and health, allowing for the monitoring of growth, stress, and potential changes in the mangrove ecosystem over time.
+Phase 1: Data Acquisition & Preprocessing (Google Earth Engine)
 
-Data Acquisition:
-Mangrove Baseline Data: The project used the Global Mangrove Forests Distribution (2000) dataset from Landsat to establish the baseline extent of the mangroves.
-Satellite Imagery for Time-Series: The Sentinel-2 MSI Harmonized image collection was used for the primary analysis due to its high spatial resolution (10m) and frequent revisit time.
-Ancillary Data: The Google Cloud Score+ dataset was integrated to provide pixel-level quality assessment for robust cloud and shadow masking.
+Objective: Create clean, analysis-ready satellite data
 
-Data Processing:
-The project was executed in two distinct phases:
-Phase 1: Defining the Region of Interest (ROI)
-The baseline mangrove map for Bangladesh was clipped to a specific study area within the Sundarbans using a user-defined rectangle.
-This raster data was then converted into a single, unified vector polygon using reduceToVectors and union(). This step was crucial to create a precise boundary that encompasses only the mangrove forest area for accurate NDVI extraction.
-Phase 2: Time-Series Analysis
-Filtering: The Sentinel-2 collection was filtered by date (2016-2024) and the mangrove polygon geometry.
-Cloud Masking: The Cloud Score+ dataset was linked to the imagery, and a function was applied to mask out pixels with a high probability of being clouds.
-NDVI Calculation: The NDVI was computed for each cloud-masked image using the Red (B4) and Near-Infrared (B8) bands.
-Temporal Aggregation: The processed images were grouped by year and month, and a monthly mean NDVI composite was generated for the entire mangrove polygon. This step reduces noise and data volume, creating a clean, consistent time series.
+Process:
+Boundary Definition: Loaded Sundarbans mangrove forest polygon (The polygon was created from a different project. It can be found in the project section titled "Mangrove-Extent-Mapping of Bangladesh")
+Satellite Collection: Accessed Sentinel-2 surface reflectance data (2016-2024)
+Cloud Masking: Implemented advanced Cloud Score+ algorithm (60% threshold)
+NDVI Calculation: Computed vegetation index using Red (B4) and NIR (B8) bands
+Monthly Composites: Generated median values for each month to reduce noise
+Data Export: Created multiband GeoTIFF with 87 monthly layers
+Technical Innovation: Used Cloud Score+ for superior cloud detection over traditional QA60 band
 
-Data Analysis:
-The final output is an interactive line chart that plots the average NDVI value for the entire mangrove forest against time. This visualization allows for the analysis of:
-Seasonal Patterns: Observing regular, intra-annual cycles of growth and senescence in the mangroves.
-Long-Term Trends: Identifying gradual increases or decreases in overall forest health and density over the 8-year period.
-Anomalies: Detecting sudden drops in NDVI that could indicate events like cyclones, drought, or illegal logging.
+Phase 2: Advanced Spatial-Temporal Analysis (Python)
 
-Potential Usage and Impact:
-Environmental Monitoring: Track the impact of climate change, sea-level rise, and extreme weather events on the world's largest mangrove forest.
-Conservation Management: Provide data-driven insights for government and NGOs to evaluate the effectiveness of conservation policies and reforestation efforts.
-Scientific Research: Serve as a baseline for studies on carbon sequestration, biodiversity, and coastal ecosystem services.
-Disaster Assessment: Quickly assess damage to the mangrove belt after major cyclones, which act as a natural bio-shield for the coastline.
+Objective: Extract meaningful ecological insights from satellite data
+
+Process:
+Data Quality Control: Filtered to complete 2016-2022 period (84 months)
+Trend Analysis: Linear regression to quantify annual mangrove health changes
+Seasonal Decomposition: Identified monthly growth patterns and stress periods
+Spatial Analysis: Mapped health distribution and variability across the forest
+Change Detection: Pixel-wise comparison between 2016 vs 2022
+Statistical Validation: R² scoring and confidence interval assessment
+
+KEY OUTCOMES & INTERPRETATION
+
+The Central Finding:
+"Broad conservation success masks localized ecological crises"
+
+Statistical Evidence:
+Positive Trend: +0.0063 NDVI/year (general improvement)
+Spatial Reality: 23% of mangroves declined significantly vs 12% improved
+Critical Insight: Widespread modest gains overwhelmed by concentrated severe losses
+
+Ecological Interpretation:
+Think of it as a hospital where average patient health is improving, but the ICU is filling up with critical cases
+
+Seasonal Intelligence:
+Optimal Growth: March (NDVI: 0.333) - pre-monsoon peak
+Critical Stress: April (NDVI: 0.229) - 31% drop from peak
+Management Implication: Target interventions pre-April to mitigate stress
+
+REAL-WORLD TRANSLATION & IMPACT
+
+For Conservation Managers:
+Resource Allocation: Focus on 2.4 million declining pixels (eastern sectors)
+Timed Interventions: Schedule activities before April stress period
+Success Replication: Study the 1.2 million improved pixels
+Monitoring Framework: Implement early warning for decline hotspots
+
+For Policy Makers:
+Evidence-Based Funding: Direct resources to areas showing actual decline
+Climate Adaptation: Develop species resilient to April dry conditions
+International Reporting: Quantify conservation progress for climate agreements
+
+For Local Communities:
+Ecosystem Services: Protect mangrove benefits (storm buffering, fisheries)
+Livelihood Security: Maintain crab and fish habitats
+Climate Resilience: Preserve natural coastal protection
