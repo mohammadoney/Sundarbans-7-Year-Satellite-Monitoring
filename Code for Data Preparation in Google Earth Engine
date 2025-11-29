@@ -1,0 +1,125 @@
+// Load the pre-defined mangrove boundary
+var geometry = ee.FeatureCollection("projects/ee-mohammadoney/assets/Mangroves_SinglePolygon");
+var mangroveGeometry = geometry.geometry();
+Map.centerObject(mangroveGeometry, 10);
+Map.addLayer(mangroveGeometry, {color: 'green'}, 'Mangrove Boundary');
+
+// Load Sentinel-2 and Cloud Score+ collections
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED');
+var csPlus = ee.ImageCollection('GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED');
+
+// Define analysis period (2016-2024)
+var startDate = '2016-01-01';
+var endDate = '2025-01-01';
+
+// Cloud Score+ configuration
+var QA_BAND = 'cs_cdf';
+var CLEAR_THRESHOLD = 0.60;
+
+// Step 1: Filter Sentinel-2 data and link with Cloud Score+
+var filteredS2 = s2
+  .filterDate(startDate, endDate)
+  .filterBounds(mangroveGeometry)
+  .select(['B4', 'B8']); // Only bands needed for NDVI
+
+print('Initial Sentinel-2 images:', filteredS2.size());
+
+// Link Cloud Score+ to Sentinel-2 collection
+var s2WithCloudScore = filteredS2.linkCollection(csPlus, [QA_BAND]);
+
+// Step 2: Apply Cloud Score+ cloud masking
+function applyCloudScoreMasking(image) {
+  return image.updateMask(image.select(QA_BAND).gte(CLEAR_THRESHOLD));
+}
+
+// Step 3: Calculate NDVI
+function calculateNDVI(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI');
+  return image.addBands(ndvi);
+}
+
+// Step 4: Apply cloud masking and calculate NDVI
+var processedS2 = s2WithCloudScore
+  .map(applyCloudScoreMasking)
+  .map(calculateNDVI)
+  .select(['NDVI']);
+
+print('Processed images with NDVI after cloud masking:', processedS2.size());
+
+// Step 5: Create monthly median composites and convert to multiband image
+var years = ee.List.sequence(2016, 2024);
+var months = ee.List.sequence(1, 12);
+
+// Create a list of monthly composite images
+var monthlyImages = years.map(function(year) {
+  return months.map(function(month) {
+    // Filter for specific year and month
+    var startDate = ee.Date.fromYMD(year, month, 1);
+    var endDate = startDate.advance(1, 'month');
+    
+    var monthlyData = processedS2.filterDate(startDate, endDate);
+    
+    // Calculate median composite
+    var monthlyComposite = monthlyData.median();
+    
+    // Count valid observations for quality assessment
+    var count = monthlyData.count();
+    
+    // Create band name with year and month (e.g., "NDVI_2016_01")
+    var bandName = ee.String('NDVI_')
+      .cat(ee.Number(year).format('%d'))
+      .cat('_')
+      .cat(ee.Number(month).format('%02d'));
+    
+    return monthlyComposite
+      .rename(bandName)
+      .set({
+        'year': year,
+        'month': month,
+        'band_name': bandName,
+        'valid_observations': count
+      });
+  });
+}).flatten();
+
+// Convert to ImageCollection and then to multiband image
+var monthlyCollection = ee.ImageCollection(monthlyImages);
+var multibandImage = monthlyCollection.toBands();
+
+// Get band names for verification
+var bandNames = multibandImage.bandNames();
+print('Total bands in multiband image:', bandNames.size());
+print('Band names (first 12):', bandNames.slice(0, 12));
+
+// Step 6: Quality check
+print('Monthly collection size:', monthlyCollection.size());
+
+// Check sample statistics
+var sampleStats = multibandImage.reduceRegion({
+  reducer: ee.Reducer.mean(),
+  geometry: mangroveGeometry,
+  scale: 100,
+  maxPixels: 1e9
+});
+
+print('Sample mean values for first 6 bands:');
+
+// Step 7: Export multiband GeoTIFF
+Export.image.toDrive({
+  image: multibandImage,
+  description: 'Sundarbans_Monthly_NDVI_Multiband_2016_2024',
+  folder: 'Mangrove_Analysis',
+  fileNamePrefix: 'sundarbans_monthly_ndvi_multiband_2016_2024',
+  region: mangroveGeometry,
+  scale: 30,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13,
+  fileFormat: 'GeoTIFF',
+  formatOptions: {
+    cloudOptimized: true
+  }
+});
+
+print('✅ Multiband GeoTIFF export task created!');
+print('Each band represents monthly median NDVI: NDVI_YYYY_MM');
+
