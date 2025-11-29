@@ -1,0 +1,216 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import rasterio
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+import warnings
+warnings.filterwarnings('ignore')
+
+# Set up professional styling
+plt.style.use('seaborn-v0_8')
+sns.set_palette("husl")
+
+# Load NDVI data
+print("📊 SUNDARBANS MANGROVE NDVI ANALYSIS (2016-2022)")
+print("=" * 50)
+
+tiff_path = '/content/drive/MyDrive/earthengine/sundarbans_monthly_ndvi_multiband_2016_2024.tif'
+
+with rasterio.open(tiff_path) as src:
+    data = src.read()
+    profile = src.profile
+
+# Use only complete 2016-2022 data (84 months)
+complete_data = data[:84]
+
+print(f"Data: {complete_data.shape[0]} months, {complete_data.shape[1]}x{complete_data.shape[2]} pixels")
+
+# Calculate monthly means
+monthly_means = []
+monthly_stds = []
+dates = []
+
+for i in range(complete_data.shape[0]):
+    band_data = complete_data[i]
+    valid_data = band_data[~np.isnan(band_data)]
+    if len(valid_data) > 0:
+        monthly_means.append(np.mean(valid_data))
+        monthly_stds.append(np.std(valid_data))
+        year = 2016 + i // 12
+        month = (i % 12) + 1
+        dates.append(f"{year}-{month:02d}")
+
+# Create time series dataframe
+ts_df = pd.DataFrame({
+    'date': pd.to_datetime(dates),
+    'ndvi_mean': monthly_means,
+    'ndvi_std': monthly_stds,
+    'year': [d.year for d in pd.to_datetime(dates)],
+    'month': [d.month for d in pd.to_datetime(dates)]
+})
+
+# Calculate annual trends
+annual_means = ts_df.groupby('year')['ndvi_mean'].mean()
+years = annual_means.index.values.reshape(-1, 1)
+ndvi_values = annual_means.values
+
+# Linear regression for trend
+lr = LinearRegression()
+lr.fit(years, ndvi_values)
+trend = lr.coef_[0]
+r2 = r2_score(ndvi_values, lr.predict(years))
+
+print(f"\n📈 TREND ANALYSIS")
+print("-" * 30)
+print(f"Annual Trend: {trend:.4f} NDVI/year")
+print(f"R²: {r2:.3f}")
+print(f"Total Change: {ndvi_values[-1] - ndvi_values[0]:.3f}")
+
+# Seasonal analysis
+seasonal_means = ts_df.groupby('month')['ndvi_mean'].mean()
+print(f"\n🌿 SEASONAL PATTERNS")
+print("-" * 30)
+month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+for month, mean_ndvi in zip(seasonal_means.index, seasonal_means.values):
+    print(f"{month_names[month-1]}: {mean_ndvi:.3f}")
+
+# Spatial analysis
+multi_year_mean = np.nanmean(complete_data, axis=0)
+spatial_std = np.nanstd(complete_data, axis=0)
+
+print(f"\n🗺️ SPATIAL PATTERNS")
+print("-" * 30)
+print(f"Mean NDVI: {np.nanmean(multi_year_mean):.3f}")
+print(f"Spatial variability: {np.nanmean(spatial_std):.3f}")
+
+# Change detection
+first_year = np.nanmean(complete_data[:12], axis=0)  # 2016
+last_year = np.nanmean(complete_data[-12:], axis=0)  # 2022
+change = last_year - first_year
+
+print(f"\n🔄 CHANGE DETECTION")
+print("-" * 30)
+print(f"Improved areas: {np.sum(change > 0.1):,} pixels")
+print(f"Declined areas: {np.sum(change < -0.1):,} pixels")
+print(f"Stable areas: {np.sum((change >= -0.1) & (change <= 0.1)):,} pixels")
+print(f"Net change: {np.nanmean(change):.3f}")
+
+# Create comprehensive visualization dashboard
+fig = plt.figure(figsize=(18, 12))
+
+# 1. Time Series with uncertainty
+ax1 = plt.subplot(2, 3, 1)
+plt.plot(ts_df['date'], ts_df['ndvi_mean'], linewidth=2, color='green', alpha=0.7)
+plt.fill_between(ts_df['date'],
+                 ts_df['ndvi_mean'] - ts_df['ndvi_std'],
+                 ts_df['ndvi_mean'] + ts_df['ndvi_std'],
+                 alpha=0.2, color='green')
+plt.title('Monthly NDVI Time Series\n(2016-2022)', fontsize=12, fontweight='bold')
+plt.ylabel('NDVI')
+plt.grid(True, alpha=0.3)
+plt.xticks(rotation=45)
+
+# 2. Annual Trend
+ax2 = plt.subplot(2, 3, 2)
+plt.bar(annual_means.index, annual_means.values, color='lightgreen', alpha=0.7)
+plt.plot(annual_means.index, lr.predict(years), 'r-', linewidth=2,
+         label=f'Trend: {trend:.4f}/year\nR² = {r2:.3f}')
+plt.title('Annual Mean NDVI with Trend', fontsize=12, fontweight='bold')
+plt.ylabel('NDVI')
+plt.legend(fontsize=9)
+plt.grid(True, alpha=0.3)
+
+# 3. Seasonal Pattern
+ax3 = plt.subplot(2, 3, 3)
+plt.bar(month_names, seasonal_means.values, color='teal', alpha=0.7)
+plt.title('Average Seasonal NDVI Pattern', fontsize=12, fontweight='bold')
+plt.ylabel('NDVI')
+plt.xticks(rotation=45)
+
+# 4. Multi-year Mean Map
+ax4 = plt.subplot(2, 3, 4)
+im1 = plt.imshow(multi_year_mean, cmap='YlGn', vmin=0, vmax=0.8)
+plt.colorbar(im1, label='NDVI', shrink=0.8)
+plt.title('Multi-year Mean NDVI\n(2016-2022)', fontsize=12, fontweight='bold')
+plt.axis('off')
+
+# 5. Change Detection Map
+ax5 = plt.subplot(2, 3, 5)
+im2 = plt.imshow(change, cmap='RdBu_r', vmin=-0.3, vmax=0.3)
+plt.colorbar(im2, label='NDVI Change', shrink=0.8)
+plt.title('NDVI Change Detection\n(2022 vs 2016)', fontsize=12, fontweight='bold')
+plt.axis('off')
+
+# 6. Spatial Variability
+ax6 = plt.subplot(2, 3, 6)
+im3 = plt.imshow(spatial_std, cmap='viridis', vmin=0, vmax=0.3)
+plt.colorbar(im3, label='NDVI Std Dev', shrink=0.8)
+plt.title('Spatial Variability', fontsize=12, fontweight='bold')
+plt.axis('off')
+
+plt.tight_layout()
+plt.show()
+
+# Data distribution (separate figure)
+plt.figure(figsize=(15, 4))
+
+plt.subplot(1, 3, 1)
+all_ndvi = complete_data[~np.isnan(complete_data)]
+plt.hist(all_ndvi, bins=50, density=True, alpha=0.7, color='green')
+plt.title('NDVI Distribution (2016-2022)', fontweight='bold')
+plt.xlabel('NDVI')
+plt.ylabel('Density')
+plt.grid(True, alpha=0.3)
+
+plt.subplot(1, 3, 2)
+# Data quality plot
+valid_pixels = []
+for i in range(complete_data.shape[0]):
+    band_data = complete_data[i]
+    valid_mask = ~np.isnan(band_data)
+    valid_pixels.append(np.sum(valid_mask))
+
+plt.plot(valid_pixels, 'o-', alpha=0.7, color='blue', markersize=3)
+plt.title('Data Quality: Valid Pixels per Month', fontweight='bold')
+plt.xlabel('Month Index')
+plt.ylabel('Valid Pixels')
+plt.grid(True, alpha=0.3)
+
+plt.subplot(1, 3, 3)
+# Statistical summary
+stats_text = f"""STATISTICAL SUMMARY
+
+Time Period: 2016-2022
+Total Months: 84
+Spatial Resolution: 30m
+
+TRENDS:
+• Trend: {trend:.4f} NDVI/year
+• R²: {r2:.3f}
+• Change: {ndvi_values[-1] - ndvi_values[0]:.3f}
+
+SPATIAL:
+• Mean: {np.nanmean(multi_year_mean):.3f}
+• Std: {np.nanmean(spatial_std):.3f}
+
+CHANGE:
+• Improved: {np.sum(change > 0.1):,}
+• Declined: {np.sum(change < -0.1):,}
+• Net: {np.nanmean(change):.3f}
+"""
+plt.text(0.1, 0.5, stats_text, fontfamily='monospace', fontsize=10,
+         verticalalignment='center', linespacing=1.5)
+plt.axis('off')
+
+plt.tight_layout()
+plt.show()
+
+print(f"\n💡 KEY INSIGHTS")
+print("=" * 50)
+print(f"• Positive trend: {trend:.4f} NDVI/year (R² = {r2:.3f})")
+print(f"• Seasonal peak: {month_names[np.argmax(seasonal_means.values)]} (NDVI: {np.max(seasonal_means.values):.3f})")
+print(f"• Stress period: {month_names[np.argmin(seasonal_means.values)]} (NDVI: {np.min(seasonal_means.values):.3f})")
+print(f"• Conservation priority: {np.sum(change < -0.1):,} pixels declined significantly")
